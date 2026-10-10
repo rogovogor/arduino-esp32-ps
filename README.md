@@ -84,7 +84,17 @@ bash scripts/assemble.sh
 bash scripts/verify.sh dist/framework-arduinoespressif32-*.tar.gz
 ```
 
-Without Docker, run `scripts/build-libs.sh` in a shell where ESP-IDF 4.4.7 is
+Without Docker and without root, `scripts/setup-idf-noroot.sh` installs ESP-IDF
+4.4.7, its toolchains and a private Python venv, then writes
+`build/env-noroot.sh`:
+
+```
+bash scripts/setup-idf-noroot.sh
+source build/env-noroot.sh
+bash scripts/build-libs.sh
+```
+
+Otherwise run `scripts/build-libs.sh` in a shell where ESP-IDF 4.4.7 is
 exported (`. $IDF_PATH/export.sh`). CI does the same on GitHub Actions; a tag
 `2.0.17-ps.N` publishes a draft release.
 
