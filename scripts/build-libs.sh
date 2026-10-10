@@ -1,6 +1,7 @@
 #!/bin/bash
 # Rebuild the arduino-esp32 2.0.17 IDF libraries with power management enabled.
-# Runs inside the IDF 4.4.7 container (see Dockerfile). Output: build/out/tools/sdk/<target>/
+# Runs inside the IDF 4.4.7 container (see Dockerfile) or after
+# scripts/setup-idf-noroot.sh. Output: build/out/tools/sdk/<target>/
 #
 # The input sdkconfig is the stock one shipped with arduino-esp32 2.0.17 plus our
 # delta (recipe/defconfig.powersaving), not the lib-builder's generic defconfigs:
@@ -9,32 +10,58 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
 source versions.env
-: "${IDF_PATH:?run inside the IDF container}"
+: "${IDF_PATH:?run inside the IDF container, or source build/env-noroot.sh first}"
 
 WORK=$ROOT/build
 LB=$WORK/lib-builder
 mkdir -p "$WORK"
 
 # Stock arduino-esp32 tree: the source of the per-target stock sdkconfig
-if [ ! -d "$WORK/arduino-esp32" ]; then
+if [ ! -d "$WORK/arduino-esp32/.git" ]; then
   git clone --depth 1 --branch "$ARDUINO_VERSION" https://github.com/espressif/arduino-esp32 "$WORK/arduino-esp32"
 fi
 
-# Library builder at the pinned commit
-if [ ! -d "$LB" ]; then
+# Library builder at the pinned commit. The pin is a full commit id that is not
+# reachable from any branch (it is the commit the stock 2.0.17 libraries were
+# built with), so plain "clone && checkout" fails on a fresh checkout: fetch it
+# explicitly by SHA first.
+if [ ! -d "$LB/.git" ]; then
   git clone https://github.com/espressif/esp32-arduino-lib-builder "$LB"
 fi
-git -C "$LB" checkout -q "$LIB_BUILDER_COMMIT"
+if ! git -C "$LB" cat-file -e "${LIB_BUILDER_COMMIT}^{commit}" 2>/dev/null; then
+  git -C "$LB" fetch -q origin "$LIB_BUILDER_COMMIT"
+fi
+git -C "$LB" checkout -q --detach "$LIB_BUILDER_COMMIT"
 cp recipe/defconfig.powersaving "$LB/configs/defconfig.powersaving"
 
-# Components, pinned to what the stock 2.0.17 libraries were built from
 cd "$LB"
-if [ ! -d components/arduino ]; then
-  bash tools/update-components.sh
+
+# Only the two external components the core needs. The optional components
+# (camera, esp-dl, esp_littlefs, esp-rainmaker, esp-dsp) are deliberately NOT
+# built: the stock PlatformIO package this build is laid over already ships
+# them, and pulling them into the project would replace their lib/*.a and add
+# their Kconfig symbols to sdkconfig.h. Their stock commits stay in versions.env
+# and are checked by scripts/check-pins.sh.
+if [ ! -d components/arduino/.git ]; then
+  git clone -q --depth 1 --branch "$ARDUINO_COMPONENT_REF" \
+    https://github.com/espressif/arduino-esp32.git components/arduino
 fi
-pin() { [ -d "$1" ] && git -C "$1" fetch -q --all --tags && git -C "$1" checkout -q "$2"; }
+if [ ! -d components/arduino_tinyusb/tinyusb/.git ]; then
+  git clone -q https://github.com/hathach/tinyusb.git components/arduino_tinyusb/tinyusb
+fi
+
+pin() {   # <component-dir> <ref>
+  [ -d "$1/.git" ] || return 0
+  if ! git -C "$1" rev-parse --verify -q "$2^{commit}" >/dev/null 2>&1; then
+    git -C "$1" fetch -q origin
+    git -C "$1" fetch -q --tags origin
+  fi
+  git -C "$1" checkout -q --detach "$2"
+}
 pin components/arduino                 "$ARDUINO_COMPONENT_REF"
 pin components/arduino_tinyusb/tinyusb "$TINYUSB_COMMIT"
+# Optional components: pinned only if a caller pre-populated them. This recipe
+# does not clone them (see above).
 pin components/esp32-camera            "$ESP32_CAMERA_COMMIT"
 pin components/esp-dl                  "$ESP_DL_COMMIT"
 pin components/esp_littlefs            "$ESP_LITTLEFS_COMMIT"
