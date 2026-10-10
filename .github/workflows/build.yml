@@ -1,0 +1,44 @@
+name: Build core
+
+# Manual run, or a tag "2.0.17-ps.N": the tag also publishes the release.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["*-ps.*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load pinned versions
+        run: grep -E '^[A-Z_]+=' versions.env >> "$GITHUB_ENV"
+
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+
+      - name: Build IDF libraries (IDF ${{ env.IDF_VERSION }})
+        run: |
+          docker build --build-arg IDF_DOCKER_IMAGE="$IDF_DOCKER_IMAGE" -t ps-builder .
+          docker run --rm -v "$PWD:/work" -w /work ps-builder bash scripts/build-libs.sh
+
+      - name: Assemble package
+        run: bash scripts/assemble.sh
+
+      - name: Verify package
+        run: bash scripts/verify.sh dist/framework-arduinoespressif32-*.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: framework-arduinoespressif32-ps
+          path: dist/*
+          retention-days: 14
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          draft: true
