@@ -17,8 +17,9 @@ OUT=${3:-}
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/new" "$TMP/ref"
 
-new_top=$(tar -tzf "$NEW" | head -1 | cut -d/ -f1)
-ref_top=$(tar -tzf "$REF" | head -1 | cut -d/ -f1)
+# tar gets SIGPIPE when head exits, which pipefail turns into a fatal 141.
+new_top=$(set +o pipefail; tar -tzf "$NEW" 2>/dev/null | head -1 | cut -d/ -f1)
+ref_top=$(set +o pipefail; tar -tzf "$REF" 2>/dev/null | head -1 | cut -d/ -f1)
 echo "new top: $new_top"
 echo "ref top: $ref_top"
 
